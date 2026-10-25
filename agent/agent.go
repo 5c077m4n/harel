@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/5c077m4n/harel/llm"
 	"github.com/5c077m4n/harel/plugin"
@@ -13,6 +14,7 @@ import (
 type Agent struct {
 	llm     *llm.Client
 	plugins []plugin.Plugin
+	queries atomic.Int64
 }
 
 func New() *Agent {
@@ -86,6 +88,12 @@ func (a *Agent) Run(ctx context.Context) error {
 					if err != nil {
 						errs <- err
 						return
+					}
+					if a.queries.Add(1)%state.VacuumInterval == 0 {
+						if err := state.Vacuum(); err != nil {
+							errs <- err
+							return
+						}
 					}
 					select {
 					case outCh <- reply:

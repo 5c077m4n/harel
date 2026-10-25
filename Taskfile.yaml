@@ -28,3 +28,7 @@ tasks:
   test:
     cmds:
       - "curl -s -X POST http://{{.ADDR}}/message -H 'Content-Type: application/json' --data '{\"text\":\"Say exactly: harel works. On a new line write MEMORY: test ran.\"}'"
+
+  vacuum:
+    cmds:
+      - go run ./cmd/vacuum

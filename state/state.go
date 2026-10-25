@@ -5,11 +5,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+var mu sync.Mutex
 
 var defaultSoul = []byte("You are Harel, a helpful assistant.")
 
-const PendingLimit = 20
+const (
+	PendingLimit   = 20
+	VacuumInterval = 5
+	MaxMemoryLines = 100
+)
 
 func Dir() (string, error) {
 	base := os.Getenv("XDG_STATE_HOME")
@@ -51,6 +58,8 @@ func Load() (string, error) {
 }
 
 func AppendMemory(line string) error {
+	mu.Lock()
+	defer mu.Unlock()
 	d, err := Dir()
 	if err != nil {
 		return err
@@ -79,7 +88,39 @@ func PendingCount() (int, error) {
 	return strings.Count(strings.TrimRight(string(b), "\n"), "\n") + 1, nil
 }
 
+func Vacuum() error {
+	mu.Lock()
+	defer mu.Unlock()
+	d, err := Dir()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(d, "pending.md")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	lines, err := readLines(filepath.Join(d, "memory.md"))
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(lines))
+	var keep []string
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		keep = append(keep, t)
+	}
+	if len(keep) > MaxMemoryLines {
+		keep = keep[len(keep)-MaxMemoryLines:]
+	}
+	return writeLines(filepath.Join(d, "memory.md"), keep)
+}
+
 func Consolidate(gen func(prompt string) (string, error)) error {
+	mu.Lock()
+	defer mu.Unlock()
 	d, err := Dir()
 	if err != nil {
 		return err
