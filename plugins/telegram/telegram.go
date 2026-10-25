@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -77,7 +78,11 @@ type update struct {
 }
 
 func (p *Plugin) poll(ctx context.Context) ([]update, error) {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&limit=100&timeout=5", p.token, p.offset)
+	url := fmt.Sprintf(
+		"https://api.telegram.org/bot%s/getUpdates?offset=%d&limit=100&timeout=5",
+		p.token,
+		p.offset,
+	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -86,7 +91,11 @@ func (p *Plugin) poll(ctx context.Context) ([]update, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("body not closed", slog.String("error", err.Error()))
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -113,7 +122,11 @@ func (p *Plugin) send(chatID int64, text string) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", p.token), bytes.NewReader(body))
+	req, err := http.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", p.token),
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return err
 	}
@@ -122,7 +135,12 @@ func (p *Plugin) send(chatID int64, text string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("body not closed", slog.String("error", err.Error()))
+		}
+	}()
+
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("telegram sendMessage: %d %s", resp.StatusCode, b)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -37,14 +38,15 @@ func (c *Client) Chat(messages []Message) (string, error) {
 	body, err := json.Marshal(struct {
 		Model    string    `json:"model"`
 		Messages []Message `json:"messages"`
-	}{
-		Model:    c.model,
-		Messages: messages,
-	})
+	}{Model: c.model, Messages: messages})
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest(http.MethodPost, "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequest(
+		http.MethodPost,
+		"https://openrouter.ai/api/v1/chat/completions",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return "", err
 	}
@@ -54,7 +56,11 @@ func (c *Client) Chat(messages []Message) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("body not closed", slog.String("error", err.Error()))
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))

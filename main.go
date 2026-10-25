@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -50,7 +51,10 @@ func main() {
 		}()
 		go func() {
 			<-ctx.Done()
-			srv.Close()
+
+			if err := srv.Close(); err != nil {
+				slog.Warn("could not close server", slog.String("error", err.Error()))
+			}
 		}()
 	}
 

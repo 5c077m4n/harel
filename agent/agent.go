@@ -18,9 +18,7 @@ type Agent struct {
 }
 
 func New() *Agent {
-	return &Agent{
-		llm: llm.New(),
-	}
+	return &Agent{llm: llm.New()}
 }
 
 func (a *Agent) Register(p plugin.Plugin) {
@@ -70,13 +68,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	for _, p := range a.plugins {
 		in := make(chan string)
 		out := make(chan string)
-		wg.Add(1)
-		go func(pl plugin.Plugin) {
-			defer wg.Done()
-			if err := pl.Start(runCtx, in, out); err != nil {
+		wg.Go(func() {
+			if err := p.Start(runCtx, in, out); err != nil {
 				errs <- err
 			}
-		}(p)
+		})
 
 		go func(inCh <-chan string, outCh chan<- string) {
 			for {
