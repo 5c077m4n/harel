@@ -44,6 +44,18 @@ func (a *Agent) Process(msg string) (string, error) {
 			}
 		}
 	}
+	if n, err := state.PendingCount(); err != nil {
+		return "", err
+	} else if n >= state.PendingLimit {
+		if err := state.Consolidate(func(prompt string) (string, error) {
+			return a.llm.Chat([]llm.Message{
+				{Role: "system", Content: systemPrompt},
+				{Role: "user", Content: prompt},
+			})
+		}); err != nil {
+			return "", err
+		}
+	}
 	return reply, nil
 }
 
