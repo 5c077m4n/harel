@@ -1,10 +1,15 @@
+//go:build !wasip1 || tinygo
+
 package state
 
 import (
+	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
+
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 func commitChanges(msg string, paths ...string) error {
@@ -12,45 +17,56 @@ func commitChanges(msg string, paths ...string) error {
 	if err != nil {
 		return err
 	}
-	git := func(args ...string) ([]byte, error) {
-		cmd := exec.Command("git", append([]string{"-C", d}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=harel", "GIT_AUTHOR_EMAIL=harel@localhost",
-			"GIT_COMMITTER_NAME=harel", "GIT_COMMITTER_EMAIL=harel@localhost",
-		)
-		out, err := cmd.CombinedOutput()
+	repo, err := git.PlainOpen(d)
+	if errors.Is(err, git.ErrRepositoryNotExists) {
+		repo, err = git.PlainInit(d, false)
 		if err != nil {
-			return out, err
-		}
-		return out, nil
-	}
-	if _, err := git("rev-parse", "--git-dir"); err != nil {
-		if _, err := git("init", "-q"); err != nil {
 			return err
 		}
+	} else if err != nil {
+		return err
+	}
+	w, err := repo.Worktree()
+	if err != nil {
+		return err
 	}
 	for _, p := range paths {
 		rel, err := filepath.Rel(d, p)
 		if err != nil {
 			return err
 		}
-		if _, err := os.Stat(p); os.IsNotExist(err) {
-			if _, err := git("rm", "-q", "--ignore-unmatch", "--", rel); err != nil {
+		if _, statErr := os.Stat(p); errors.Is(statErr, os.ErrNotExist) {
+			idx, err := repo.Storer.Index()
+			if err != nil {
 				return err
 			}
-		} else if err != nil {
-			return err
-		} else if _, err := git("add", "--", rel); err != nil {
+			tracked := false
+			for _, e := range idx.Entries {
+				if e.Name == rel {
+					tracked = true
+					break
+				}
+			}
+			if tracked {
+				if _, err := w.Remove(rel); err != nil {
+					return err
+				}
+			}
+		} else if statErr != nil {
+			return statErr
+		} else if _, err := w.Add(rel); err != nil {
 			return err
 		}
 	}
-	out, err := git("status", "--porcelain")
+	st, err := w.Status()
 	if err != nil {
 		return err
 	}
-	if len(out) == 0 {
+	if st.IsClean() {
 		return nil
 	}
-	_, err = git("commit", "-qm", msg, "--date", time.Now().Format(time.RFC3339))
+	_, err = w.Commit(msg, &git.CommitOptions{
+		Author: &object.Signature{Name: "harel", Email: "harel@localhost", When: time.Now()},
+	})
 	return err
 }

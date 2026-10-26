@@ -34,3 +34,11 @@ tasks:
   vacuum:
     cmds:
       - go run ./cmd/vacuum
+
+  wasm-tinygo:
+    cmds:
+      - GOFIPS140=off /usr/local/tinygo/bin/tinygo build -tags tinygo,no_openssl -target=wasip1 -o harel-tinygo.wasm .
+
+  wasmtime:
+    cmds:
+      - "wasmtime run --dir {{.WASMDIR | default \"/tmp\"}}::/harel-state --env XDG_STATE_HOME=/harel-state --env HOME=/harel-state harel-tinygo.wasm"
