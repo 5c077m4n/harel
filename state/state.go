@@ -95,7 +95,8 @@ func Vacuum() error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(d, "pending.md")); err != nil && !errors.Is(err, os.ErrNotExist) {
+	pendingPath := filepath.Join(d, "pending.md")
+	if err := os.Remove(pendingPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	lines, err := readLines(filepath.Join(d, "memory.md"))
@@ -115,7 +116,11 @@ func Vacuum() error {
 	if len(keep) > MaxMemoryLines {
 		keep = keep[len(keep)-MaxMemoryLines:]
 	}
-	return writeLines(filepath.Join(d, "memory.md"), keep)
+	memPath := filepath.Join(d, "memory.md")
+	if err := writeLines(memPath, keep); err != nil {
+		return err
+	}
+	return commitChanges("vacuum memory", memPath, pendingPath)
 }
 
 func Consolidate(gen func(prompt string) (string, error)) error {
@@ -155,5 +160,8 @@ func Consolidate(gen func(prompt string) (string, error)) error {
 			return err
 		}
 	}
-	return os.Remove(pendingPath)
+	if err := os.Remove(pendingPath); err != nil {
+		return err
+	}
+	return commitChanges("consolidate memory", pendingPath)
 }

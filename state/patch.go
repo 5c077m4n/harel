@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -41,7 +42,10 @@ func writeLines(path string, lines []string) error {
 	if err := os.WriteFile(tmp, []byte(sb.String()), 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return commitChanges("update "+filepath.Base(path), path)
 }
 
 func Diff(a, b []string) []Op {
