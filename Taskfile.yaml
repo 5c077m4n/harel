@@ -1,20 +1,22 @@
 version: "3"
 
 vars:
-  ADDR: "{{.HAREL_HTTP_ADDR | default \"[IP_ADDRESS]:18431\"}}"
+  ADDR: '{{.HAREL_HTTP_ADDR | default "127.0.0.1:18431"}}'
+  TAG: '{{.PLUGIN | default "telegram"}}'
 
 tasks:
   build:
     cmds:
-      - go build -o /tmp/harel-bin .
+      - go build -tags {{.TAG}} -o /tmp/harel-bin .
 
   wasm:
     cmds:
-      - GOOS=wasip1 GOARCH=wasm go build -o harel.wasm .
+      - GOOS=wasip1 GOARCH=wasm go build -tags {{.TAG}} -o harel.wasm .
 
   vet:
     cmds:
-      - go vet ./...
+      - go vet -tags telegram ./...
+      - go vet -tags http ./...
 
   secrets:
     cmds:
