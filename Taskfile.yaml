@@ -6,12 +6,13 @@ vars:
 
 tasks:
   build:
-    cmds:
-      - go build -tags {{.TAG}} -o /tmp/harel-bin .
+    cmd: go build -tags {{.TAG}} -o /tmp/harel-bin .
 
   wasm:
-    cmds:
-      - GOOS=wasip1 GOARCH=wasm go build -tags {{.TAG}} -o harel.wasm .
+    env:
+      GOOS: wasip1
+      GOARCH: wasm
+    cmd: go build -tags {{.TAG}} -o harel.wasm .
 
   vet:
     cmds:
@@ -19,26 +20,24 @@ tasks:
       - go vet -tags http ./...
 
   secrets:
-    cmds:
-      - /usr/local/bin/hermes-ssm-env > .env
+    cmd: /usr/local/bin/hermes-ssm-env > .env
 
   run:
-    deps: [build]
-    cmds:
-      - "source <(/usr/local/bin/hermes-ssm-env | sed 's/^/export /') && HAREL_HTTP_ADDR={{.ADDR}} /tmp/harel-bin"
+    deps:
+      - build
+    cmd: source <(/usr/local/bin/hermes-ssm-env | sed 's/^/export /') && HAREL_HTTP_ADDR={{.ADDR}} /tmp/harel-bin
 
   test:
-    cmds:
-      - "curl -s -X POST http://{{.ADDR}}/message -H 'Content-Type: application/json' --data '{\"text\":\"Say exactly: harel works. On a new line write MEMORY: test ran.\"}'"
+    vars:
+      JSON_CONTENT_HEADER: "Content-Type: application/json"
+      JSON_DATA: '{"text":"Say exactly: harel works. On a new line write MEMORY: test ran."}'
+    cmd: curl -s -X POST http://{{.ADDR}}/message -H {{.JSON_CONTENT_HEADER}} --data {{.JSON_DATA}}
 
   vacuum:
-    cmds:
-      - go run ./cmd/vacuum
+    cmd: go run ./cmd/vacuum
 
   wasm-tinygo:
-    cmds:
-      - GOFIPS140=off /usr/local/tinygo/bin/tinygo build -tags tinygo,no_openssl -target=wasip1 -o harel-tinygo.wasm .
+    cmd: GOFIPS140=off /usr/local/tinygo/bin/tinygo build -tags tinygo,no_openssl -target=wasip1 -o harel-tinygo.wasm .
 
   wasmtime:
-    cmds:
-      - "wasmtime run --dir {{.WASMDIR | default \"/tmp\"}}::/harel-state --env XDG_STATE_HOME=/harel-state --env HOME=/harel-state harel-tinygo.wasm"
+    cmd: wasmtime run --dir {{.WASMDIR | default "/tmp"}}::/harel-state --env XDG_STATE_HOME=/harel-state --env HOME=/harel-state harel-tinygo.wasm

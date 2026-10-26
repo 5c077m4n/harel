@@ -1,3 +1,4 @@
+// Package state of the agent
 package state
 
 import (
@@ -60,11 +61,16 @@ func Load() (string, error) {
 func AppendMemory(line string) error {
 	mu.Lock()
 	defer mu.Unlock()
+
 	d, err := Dir()
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(d, "pending.md"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(
+		filepath.Join(d, "pending.md"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0o644,
+	)
 	if err != nil {
 		return err
 	}
@@ -143,13 +149,17 @@ func Consolidate(gen func(prompt string) (string, error)) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	prompt := "Merge the pending facts into the memory. Reply with ONLY the full updated memory, one fact per line, no preamble.\n\nCURRENT MEMORY:\n" + string(mem) + "\n\nPENDING FACTS:\n" + string(pending)
+	prompt := "Merge the pending facts into the memory. Reply with ONLY the full updated memory, one fact per line, no preamble.\n\nCURRENT MEMORY:\n" + string(
+		mem,
+	) + "\n\nPENDING FACTS:\n" + string(
+		pending,
+	)
 	out, err := gen(prompt)
 	if err != nil {
 		return err
 	}
 	var updated []string
-	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+	for l := range strings.SplitSeq(strings.TrimRight(out, "\n"), "\n") {
 		if strings.TrimSpace(l) != "" {
 			updated = append(updated, l)
 		}

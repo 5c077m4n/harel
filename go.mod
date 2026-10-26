@@ -1,6 +1,6 @@
 module github.com/5c077m4n/harel
 
-go 1.26.10
+go 1.27.3
 
 replace github.com/go-git/go-billy/v5 => ./third_party/go-billy
 
