@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/5c077m4n/harel/plugin"
@@ -34,7 +35,7 @@ func (p *Plugin) Name() string {
 	return "telegram"
 }
 
-func (p *Plugin) Start(ctx context.Context, in chan<- string, out <-chan string) error {
+func (p *Plugin) Start(ctx context.Context, in chan<- plugin.Message, out <-chan plugin.Message) error {
 	if p.token == "" {
 		return nil
 	}
@@ -44,7 +45,7 @@ func (p *Plugin) Start(ctx context.Context, in chan<- string, out <-chan string)
 		case <-ctx.Done():
 			return ctx.Err()
 		case reply := <-out:
-			if err := p.send(p.lastChat, reply); err != nil {
+			if err := p.send(reply.User, reply.Text); err != nil {
 				return err
 			}
 		default:
@@ -59,8 +60,12 @@ func (p *Plugin) Start(ctx context.Context, in chan<- string, out <-chan string)
 			}
 			if u.Message.Text != "" {
 				p.lastChat = u.Message.Chat.ID
+				uid := strconv.FormatInt(u.Message.Chat.ID, 10)
+				if u.Message.From.ID != 0 {
+					uid = strconv.FormatInt(u.Message.From.ID, 10)
+				}
 				select {
-				case in <- u.Message.Text:
+				case in <- plugin.Message{User: uid, Text: u.Message.Text}:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
@@ -73,6 +78,9 @@ type update struct {
 	UpdateID int64 `json:"update_id"`
 	Message  struct {
 		Text string `json:"text"`
+		From struct {
+			ID int64 `json:"id"`
+		} `json:"from"`
 		Chat struct {
 			ID int64 `json:"id"`
 		} `json:"chat"`
@@ -116,7 +124,7 @@ func (p *Plugin) poll(ctx context.Context) ([]update, error) {
 	return result.Result, nil
 }
 
-func (p *Plugin) send(chatID int64, text string) error {
+func (p *Plugin) send(chatID string, text string) error {
 	body, err := json.Marshal(map[string]any{
 		"chat_id": chatID,
 		"text":    text,

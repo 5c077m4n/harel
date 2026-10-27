@@ -25,29 +25,29 @@ func (a *Agent) Register(p plugin.Plugin) {
 	a.plugins = append(a.plugins, p)
 }
 
-func (a *Agent) Process(msg string) (string, error) {
-	systemPrompt, err := state.Load(state.DefaultUser())
+func (a *Agent) Process(msg plugin.Message) (string, error) {
+	systemPrompt, err := state.Load(msg.User)
 	if err != nil {
 		return "", err
 	}
 	reply, err := a.llm.Chat([]llm.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: msg},
+		{Role: "user", Content: msg.Text},
 	})
 	if err != nil {
 		return "", err
 	}
 	for _, line := range strings.Split(reply, "\n") {
 		if strings.HasPrefix(line, "MEMORY: ") {
-			if err := state.AppendMemory(state.DefaultUser(), strings.TrimPrefix(line, "MEMORY: ")); err != nil {
+			if err := state.AppendMemory(msg.User, strings.TrimPrefix(line, "MEMORY: ")); err != nil {
 				return "", err
 			}
 		}
 	}
-	if n, err := state.PendingCount(state.DefaultUser()); err != nil {
+	if n, err := state.PendingCount(msg.User); err != nil {
 		return "", err
 	} else if n >= state.PendingLimit {
-		if err := state.Consolidate(state.DefaultUser(), func(prompt string) (string, error) {
+		if err := state.Consolidate(msg.User, func(prompt string) (string, error) {
 			return a.llm.Chat([]llm.Message{
 				{Role: "system", Content: systemPrompt},
 				{Role: "user", Content: prompt},
@@ -66,15 +66,15 @@ func (a *Agent) Run(ctx context.Context) error {
 	errs := make(chan error, len(a.plugins))
 	var wg sync.WaitGroup
 	for _, p := range a.plugins {
-		in := make(chan string)
-		out := make(chan string)
+		in := make(chan plugin.Message)
+		out := make(chan plugin.Message)
 		wg.Go(func() {
 			if err := p.Start(runCtx, in, out); err != nil {
 				errs <- err
 			}
 		})
 
-		go func(inCh <-chan string, outCh chan<- string) {
+		go func(inCh <-chan plugin.Message, outCh chan<- plugin.Message) {
 			for {
 				select {
 				case <-runCtx.Done():
@@ -86,13 +86,13 @@ func (a *Agent) Run(ctx context.Context) error {
 						return
 					}
 					if a.queries.Add(1)%state.VacuumInterval == 0 {
-						if err := state.Vacuum(state.DefaultUser()); err != nil {
+						if err := state.Vacuum(msg.User); err != nil {
 							errs <- err
 							return
 						}
 					}
 					select {
-					case outCh <- reply:
+					case outCh <- plugin.Message{User: msg.User, Text: reply}:
 					case <-runCtx.Done():
 						return
 					}

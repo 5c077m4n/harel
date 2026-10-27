@@ -11,7 +11,10 @@ import (
 
 var mu sync.Mutex
 
-var defaultSoul = []byte("You are Harel, a helpful assistant.")
+var defaultSoul = []byte(`You are Harel, a helpful assistant.
+When the user shares a durable personal fact, end your reply with a line exactly:
+MEMORY: <fact>
+One fact per line. Do not use MEMORY: for anything else.`)
 
 const (
 	PendingLimit   = 20
@@ -46,8 +49,8 @@ func Dir() (string, error) {
 
 // Context keys (per user): "<user>\x1fcontext/soul", ".../memory", ".../pending".
 // Skills: "<user>\x1fskill/<name>".
-func contextKey(user, name string) string { return "context/" + name }
-func skillKey(name string) string         { return "skill/" + name }
+func contextKey(user, name string) string { return user + "\x1fcontext/" + name }
+func skillKey(user, name string) string   { return user + "\x1fskill/" + name }
 
 func Load(user string) (string, error) {
 	mu.Lock()
@@ -164,15 +167,15 @@ func SetSkill(user, name string, md []byte) error {
 	if strings.TrimSpace(name) == "" {
 		return errors.New("skill name required")
 	}
-	return Set(user, skillKey(name), md)
+	return Set(user, skillKey(user, name), md)
 }
 
 func GetSkill(user, name string) ([]byte, error) {
-	return Get(user, skillKey(name))
+	return Get(user, skillKey(user, name))
 }
 
 func DeleteSkill(user, name string) error {
-	return Delete(user, skillKey(name))
+	return Delete(user, skillKey(user, name))
 }
 
 func ListSkills(user string) ([]string, error) {
