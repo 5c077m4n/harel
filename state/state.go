@@ -2,6 +2,7 @@ package state
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,15 @@ const (
 	VacuumInterval = 5
 	MaxMemoryLines = 100
 )
+
+// DefaultUser is the user scope used when a caller doesn't specify one;
+// overridden by HAREL_USER.
+func DefaultUser() string {
+	if u := os.Getenv("HAREL_USER"); u != "" {
+		return u
+	}
+	return "default"
+}
 
 func Dir() (string, error) {
 	base := os.Getenv("XDG_STATE_HOME")
@@ -34,78 +44,69 @@ func Dir() (string, error) {
 	return d, nil
 }
 
-func Load() (string, error) {
-	d, err := Dir()
-	if err != nil {
-		return "", err
-	}
-	soul, err := os.ReadFile(filepath.Join(d, "soul.md"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+// Context keys (per user): "<user>\x1fcontext/soul", ".../memory", ".../pending".
+// Skills: "<user>\x1fskill/<name>".
+func contextKey(user, name string) string { return "context/" + name }
+func skillKey(name string) string         { return "skill/" + name }
+
+func Load(user string) (string, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	soul, err := Get(user, contextKey(user, "soul"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return "", err
 	}
 	if len(soul) == 0 {
 		soul = defaultSoul
 	}
-	mem, err := os.ReadFile(filepath.Join(d, "memory.md"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	mem, err := Get(user, contextKey(user, "memory"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return "", err
 	}
-	pending, err := os.ReadFile(filepath.Join(d, "pending.md"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	pending, err := Get(user, contextKey(user, "pending"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return "", err
 	}
 	return string(soul) + "\n" + string(mem) + string(pending), nil
 }
 
-func AppendMemory(line string) error {
+func AppendMemory(user, line string) error {
 	mu.Lock()
 	defer mu.Unlock()
-	d, err := Dir()
-	if err != nil {
+	pending, err := Get(user, contextKey(user, "pending"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(d, "pending.md"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(line + "\n")
-	return err
+	return Set(user, contextKey(user, "pending"), append(pending, []byte(line+"\n")...))
 }
 
-func PendingCount() (int, error) {
-	d, err := Dir()
-	if err != nil {
-		return 0, err
-	}
-	b, err := os.ReadFile(filepath.Join(d, "pending.md"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return 0, err
-	}
-	if len(b) == 0 {
+func PendingCount(user string) (int, error) {
+	pending, err := Get(user, contextKey(user, "pending"))
+	if errors.Is(err, ErrNotFound) {
 		return 0, nil
 	}
-	return strings.Count(strings.TrimRight(string(b), "\n"), "\n") + 1, nil
+	if err != nil {
+		return 0, err
+	}
+	if len(pending) == 0 {
+		return 0, nil
+	}
+	return strings.Count(strings.TrimRight(string(pending), "\n"), "\n") + 1, nil
 }
 
-func Vacuum() error {
+func Vacuum(user string) error {
 	mu.Lock()
 	defer mu.Unlock()
-	d, err := Dir()
-	if err != nil {
+	mem, err := Get(user, contextKey(user, "memory"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	pendingPath := filepath.Join(d, "pending.md")
-	if err := os.Remove(pendingPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := Delete(user, contextKey(user, "pending")); err != nil {
 		return err
 	}
-	lines, err := readLines(filepath.Join(d, "memory.md"))
-	if err != nil {
-		return err
-	}
-	seen := make(map[string]bool, len(lines))
+	seen := make(map[string]bool, len(splitLines(mem)))
 	var keep []string
-	for _, l := range lines {
+	for _, l := range splitLines(mem) {
 		t := strings.TrimSpace(l)
 		if t == "" || seen[t] {
 			continue
@@ -116,34 +117,29 @@ func Vacuum() error {
 	if len(keep) > MaxMemoryLines {
 		keep = keep[len(keep)-MaxMemoryLines:]
 	}
-	memPath := filepath.Join(d, "memory.md")
-	if err := writeLines(memPath, keep); err != nil {
-		return err
+	var sb strings.Builder
+	for _, l := range keep {
+		sb.WriteString(l)
+		sb.WriteString("\n")
 	}
-	return commitChanges("vacuum memory", memPath, pendingPath)
+	return Set(user, contextKey(user, "memory"), []byte(sb.String()))
 }
 
-func Consolidate(gen func(prompt string) (string, error)) error {
+func Consolidate(user string, gen func(prompt string) (string, error)) error {
 	mu.Lock()
 	defer mu.Unlock()
-	d, err := Dir()
-	if err != nil {
-		return err
-	}
-	pendingPath := filepath.Join(d, "pending.md")
-	pending, err := os.ReadFile(pendingPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	pending, err := Get(user, contextKey(user, "pending"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
 	if len(pending) == 0 {
 		return nil
 	}
-	memPath := filepath.Join(d, "memory.md")
-	mem, err := os.ReadFile(memPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	mem, err := Get(user, contextKey(user, "memory"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	prompt := "Merge the pending facts into the memory. Reply with ONLY the full updated memory, one fact per line, no preamble.\n\nCURRENT MEMORY:\n" + string(mem) + "\n\nPENDING FACTS:\n" + string(pending)
+	prompt := fmt.Sprintf("Merge the pending facts into the memory. Reply with ONLY the full updated memory, one fact per line, no preamble.\n\nCURRENT MEMORY:\n%s\n\nPENDING FACTS:\n%s", string(mem), string(pending))
 	out, err := gen(prompt)
 	if err != nil {
 		return err
@@ -156,12 +152,37 @@ func Consolidate(gen func(prompt string) (string, error)) error {
 	}
 	ops := Diff(splitLines(mem), updated)
 	if len(ops) > 0 {
-		if err := Apply(memPath, ops); err != nil {
+		if err := Apply(user, ops); err != nil {
 			return err
 		}
 	}
-	if err := os.Remove(pendingPath); err != nil {
-		return err
+	return Delete(user, contextKey(user, "pending"))
+}
+
+// Skills are stored per user under "<user>\x1fskill/<name>" as raw markdown.
+func SetSkill(user, name string, md []byte) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("skill name required")
 	}
-	return commitChanges("consolidate memory", pendingPath)
+	return Set(user, skillKey(name), md)
+}
+
+func GetSkill(user, name string) ([]byte, error) {
+	return Get(user, skillKey(name))
+}
+
+func DeleteSkill(user, name string) error {
+	return Delete(user, skillKey(name))
+}
+
+func ListSkills(user string) ([]string, error) {
+	entries, err := List(user, "skill/")
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = strings.TrimPrefix(e.Key, "skill/")
+	}
+	return names, nil
 }

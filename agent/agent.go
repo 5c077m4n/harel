@@ -26,7 +26,7 @@ func (a *Agent) Register(p plugin.Plugin) {
 }
 
 func (a *Agent) Process(msg string) (string, error) {
-	systemPrompt, err := state.Load()
+	systemPrompt, err := state.Load(state.DefaultUser())
 	if err != nil {
 		return "", err
 	}
@@ -39,15 +39,15 @@ func (a *Agent) Process(msg string) (string, error) {
 	}
 	for _, line := range strings.Split(reply, "\n") {
 		if strings.HasPrefix(line, "MEMORY: ") {
-			if err := state.AppendMemory(strings.TrimPrefix(line, "MEMORY: ")); err != nil {
+			if err := state.AppendMemory(state.DefaultUser(), strings.TrimPrefix(line, "MEMORY: ")); err != nil {
 				return "", err
 			}
 		}
 	}
-	if n, err := state.PendingCount(); err != nil {
+	if n, err := state.PendingCount(state.DefaultUser()); err != nil {
 		return "", err
 	} else if n >= state.PendingLimit {
-		if err := state.Consolidate(func(prompt string) (string, error) {
+		if err := state.Consolidate(state.DefaultUser(), func(prompt string) (string, error) {
 			return a.llm.Chat([]llm.Message{
 				{Role: "system", Content: systemPrompt},
 				{Role: "user", Content: prompt},
@@ -86,7 +86,7 @@ func (a *Agent) Run(ctx context.Context) error {
 						return
 					}
 					if a.queries.Add(1)%state.VacuumInterval == 0 {
-						if err := state.Vacuum(); err != nil {
+						if err := state.Vacuum(state.DefaultUser()); err != nil {
 							errs <- err
 							return
 						}

@@ -2,8 +2,6 @@ package state
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -11,17 +9,6 @@ type Op struct {
 	Pos int
 	Del int
 	Add []string
-}
-
-func readLines(path string) ([]string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return splitLines(b), nil
 }
 
 func splitLines(b []byte) []string {
@@ -32,20 +19,13 @@ func splitLines(b []byte) []string {
 	return strings.Split(s, "\n")
 }
 
-func writeLines(path string, lines []string) error {
-	tmp := path + ".tmp"
+func linesBytes(lines []string) []byte {
 	var sb strings.Builder
 	for _, l := range lines {
 		sb.WriteString(l)
 		sb.WriteString("\n")
 	}
-	if err := os.WriteFile(tmp, []byte(sb.String()), 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	return commitChanges("update "+filepath.Base(path), path)
+	return []byte(sb.String())
 }
 
 func Diff(a, b []string) []Op {
@@ -85,11 +65,14 @@ func Diff(a, b []string) []Op {
 	return ops
 }
 
-func Apply(path string, ops []Op) error {
-	lines, err := readLines(path)
-	if err != nil {
+// Apply patches the user's memory with the minimal ops from Diff, then
+// persists the result to pebble.
+func Apply(user string, ops []Op) error {
+	mem, err := Get(user, contextKey(user, "memory"))
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
+	lines := splitLines(mem)
 	delta := 0
 	for _, op := range ops {
 		pos := op.Pos + delta
@@ -102,5 +85,5 @@ func Apply(path string, ops []Op) error {
 		lines = out
 		delta += len(op.Add) - op.Del
 	}
-	return writeLines(path, lines)
+	return Set(user, contextKey(user, "memory"), linesBytes(lines))
 }

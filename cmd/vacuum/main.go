@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	if err := state.Vacuum(); err != nil {
+	if err := state.Vacuum(state.DefaultUser()); err != nil {
 		panic(err)
 	}
 	os.Exit(0)
